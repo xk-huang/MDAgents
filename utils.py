@@ -1,13 +1,15 @@
-import os
 import json
+import os
 import random
-from tqdm import tqdm
-from prettytable import PrettyTable 
-from termcolor import cprint
-from pptree import Node
+
 import google.generativeai as genai
 from openai import OpenAI
 from pptree import *
+from pptree import Node
+from prettytable import PrettyTable
+from termcolor import cprint
+from tqdm import tqdm
+
 
 class Agent:
     def __init__(self, instruction, role, examplers=None, model_info='gpt-4o-mini', img_path=None):
