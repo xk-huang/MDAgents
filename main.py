@@ -1,3 +1,7 @@
+import dotenv
+
+dotenv.load_dotenv(override=True)
+
 import argparse
 import json
 import os
@@ -26,10 +30,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, default="medqa")
 parser.add_argument("--model", type=str, default="gpt-4o-mini")
 parser.add_argument("--difficulty", type=str, default="adaptive")
-parser.add_argument("--num_samples", type=int, default=100)
+parser.add_argument("--num_samples", type=int, default=50)
 args = parser.parse_args()
 
-model, client = setup_model(args.model)
+# model, client = setup_model(args.model)
 test_qa, examplers = load_data(args.dataset)
 
 agent_emoji = [
@@ -46,6 +50,7 @@ agent_emoji = [
 ]
 random.shuffle(agent_emoji)
 
+print(f"num_samples: {args.num_samples}")
 results = []
 for no, sample in enumerate(tqdm(test_qa)):
     if no == args.num_samples:

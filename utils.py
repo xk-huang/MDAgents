@@ -1,8 +1,10 @@
 import json
 import os
 import random
+from pathlib import Path
 
 import google.generativeai as genai
+from litellm import completion
 from openai import OpenAI
 from pptree import *
 from pptree import Node
@@ -24,7 +26,8 @@ class Agent:
             self.model = genai.GenerativeModel("gemini-pro")
             self._chat = self.model.start_chat(history=[])
         elif self.model_info in ["gpt-3.5", "gpt-4", "gpt-4o", "gpt-4o-mini"]:
-            self.client = OpenAI(api_key=os.environ["openai_api_key"])
+            # self.client = OpenAI(api_key=os.environ["openai_api_key"])
+            self.client = None
             self.messages = [
                 {"role": "system", "content": instruction},
             ]
@@ -61,8 +64,13 @@ class Agent:
             else:
                 model_name = "gpt-4o-mini"
 
-            response = self.client.chat.completions.create(
-                model=model_name, messages=self.messages
+            # response = self.client.chat.completions.create(
+            #     model=model_name, messages=self.messages
+            # )
+
+            # NOTE(xk) here we use litellm with azure
+            response = completion(
+                model="azure/gpt-4o-1120-nofilter-global", messages=self.messages
             )
 
             self.messages.append(
@@ -82,8 +90,15 @@ class Agent:
                     model_info = "gpt-3.5-turbo"
                 else:
                     model_info = "gpt-4o-mini"
-                response = self.client.chat.completions.create(
-                    model=model_info,
+                # response = self.client.chat.completions.create(
+                #     model=model_info,
+                #     messages=self.messages,
+                #     temperature=temperature,
+                # )
+
+                # NOTE(xk) here we use litellm with azure
+                response = completion(
+                    model="azure/gpt-4o-1120-nofilter-global",
                     messages=self.messages,
                     temperature=temperature,
                 )
@@ -249,12 +264,12 @@ def load_data(dataset):
     test_qa = []
     examplers = []
 
-    test_path = f"../data/{dataset}/test.jsonl"
+    test_path = f"data/{dataset}/test.jsonl"
     with open(test_path, "r") as file:
         for line in file:
             test_qa.append(json.loads(line))
 
-    train_path = f"../data/{dataset}/train.jsonl"
+    train_path = f"data/{dataset}/train.jsonl"
     with open(train_path, "r") as file:
         for line in file:
             examplers.append(json.loads(line))
@@ -352,9 +367,8 @@ def process_intermediate_query(question, examplers, model, args):
     tmp_agent.chat(recruit_prompt)
 
     num_agents = 5  # You can adjust this number as needed
-    recruited = tmp_agent.chat(
-        f"Question: {question}\nYou can recruit {num_agents} experts in different medical expertise. Considering the medical question and the options for the answer, what kind of experts will you recruit to better make an accurate answer?\nAlso, you need to specify the communication structure between experts (e.g., Pulmonologist == Neonatologist == Medical Geneticist == Pediatrician > Cardiologist), or indicate if they are independent.\n\nFor example, if you want to recruit five experts, you answer can be like:\n1. Pediatrician - Specializes in the medical care of infants, children, and adolescents. - Hierarchy: Independent\n2. Cardiologist - Focuses on the diagnosis and treatment of heart and blood vessel-related conditions. - Hierarchy: Pediatrician > Cardiologist\n3. Pulmonologist - Specializes in the diagnosis and treatment of respiratory system disorders. - Hierarchy: Independent\n4. Neonatologist - Focuses on the care of newborn infants, especially those who are born prematurely or have medical issues at birth. - Hierarchy: Independent\n5. Medical Geneticist - Specializes in the study of genes and heredity. - Hierarchy: Independent\n\nPlease answer in above format, and do not include your reason."
-    )
+    recruited_prompt = f'Question: {question}\nYou can recruit {num_agents} experts in different medical expertise. Considering the medical question and the options for the answer, what kind of experts will you recruit to better make an accurate answer?\nAlso, you need to specify the communication structure between experts (e.g., Pulmonologist == Neonatologist == Medical Geneticist == Pediatrician > Cardiologist), or indicate if they are independent.\n\nFor example, if you want to recruit five experts, you answer can be like:\n"""\n1. Pediatrician - Specializes in the medical care of infants, children, and adolescents. - Hierarchy: Independent\n2. Cardiologist - Focuses on the diagnosis and treatment of heart and blood vessel-related conditions. - Hierarchy: Pediatrician > Cardiologist\n3. Pulmonologist - Specializes in the diagnosis and treatment of respiratory system disorders. - Hierarchy: Independent\n4. Neonatologist - Focuses on the care of newborn infants, especially those who are born prematurely or have medical issues at birth. - Hierarchy: Independent\n5. Medical Geneticist - Specializes in the study of genes and heredity. - Hierarchy: Independent\n"""\nPlease answer in above format without triple quotes, and do not include your reason.'
+    recruited = tmp_agent.chat(recruited_prompt)
 
     agents_info = [
         agent_info.split(" - Hierarchy: ")
@@ -633,9 +647,18 @@ def process_advanced_query(question, model, args):
     num_teams = 3  # You can adjust this number as needed
     num_agents = 3  # You can adjust this number as needed
 
-    recruited = tmp_agent.chat(
-        f"Question: {question}\n\nYou should organize {num_teams} MDTs with different specialties or purposes and each MDT should have {num_agents} clinicians. Considering the medical question and the options, please return your recruitment plan to better make an accurate answer.\n\nFor example, the following can an example answer:\nGroup 1 - Initial Assessment Team (IAT)\nMember 1: Otolaryngologist (ENT Surgeon) (Lead) - Specializes in ear, nose, and throat surgery, including thyroidectomy. This member leads the group due to their critical role in the surgical intervention and managing any surgical complications, such as nerve damage.\nMember 2: General Surgeon - Provides additional surgical expertise and supports in the overall management of thyroid surgery complications.\nMember 3: Anesthesiologist - Focuses on perioperative care, pain management, and assessing any complications from anesthesia that may impact voice and airway function.\n\nGroup 2 - Diagnostic Evidence Team (DET)\nMember 1: Endocrinologist (Lead) - Oversees the long-term management of Graves' disease, including hormonal therapy and monitoring for any related complications post-surgery.\nMember 2: Speech-Language Pathologist - Specializes in voice and swallowing disorders, providing rehabilitation services to improve the patient's speech and voice quality following nerve damage.\nMember 3: Neurologist - Assesses and advises on nerve damage and potential recovery strategies, contributing neurological expertise to the patient's care.\n\nGroup 3 - Patient History Team (PHT)\nMember 1: Psychiatrist or Psychologist (Lead) - Addresses any psychological impacts of the chronic disease and its treatments, including issues related to voice changes, self-esteem, and coping strategies.\nMember 2: Physical Therapist - Offers exercises and strategies to maintain physical health and potentially support vocal function recovery indirectly through overall well-being.\nMember 3: Vocational Therapist - Assists the patient in adapting to changes in voice, especially if their profession relies heavily on vocal communication, helping them find strategies to maintain their occupational roles.\n\nGroup 4 - Final Review and Decision Team (FRDT)\nMember 1: Senior Consultant from each specialty (Lead) - Provides overarching expertise and guidance in decision\nMember 2: Clinical Decision Specialist - Coordinates the different recommendations from the various teams and formulates a comprehensive treatment plan.\nMember 3: Advanced Diagnostic Support - Utilizes advanced diagnostic tools and techniques to confirm the exact extent and cause of nerve damage, aiding in the final decision.\n\nAbove is just an example, thus, you should organize your own unique MDTs but you should include Initial Assessment Team (IAT) and Final Review and Decision Team (FRDT) in your recruitment plan. When you return your answer, please strictly refer to the above format."
-    )
+    recruited_prompt = f'Question: {question}\n\nYou should organize {num_teams} MDTs with different specialties or purposes and each MDT should have {num_agents} clinicians. Considering the medical question and the options, please return your recruitment plan to better make an accurate answer.\n\nFor example, the following can an example answer:\n"""\nGroup 1 - Initial Assessment Team (IAT)\nMember 1: Otolaryngologist (ENT Surgeon) (Lead) - Specializes in ear, nose, and throat surgery, including thyroidectomy. This member leads the group due to their critical role in the surgical intervention and managing any surgical complications, such as nerve damage.\nMember 2: General Surgeon - Provides additional surgical expertise and supports in the overall management of thyroid surgery complications.\nMember 3: Anesthesiologist - Focuses on perioperative care, pain management, and assessing any complications from anesthesia that may impact voice and airway function.\n\nGroup 2 - Diagnostic Evidence Team (DET)\nMember 1: Endocrinologist (Lead) - Oversees the long-term management of Graves\' disease, including hormonal therapy and monitoring for any related complications post-surgery.\nMember 2: Speech-Language Pathologist - Specializes in voice and swallowing disorders, providing rehabilitation services to improve the patient\'s speech and voice quality following nerve damage.\nMember 3: Neurologist - Assesses and advises on nerve damage and potential recovery strategies, contributing neurological expertise to the patient\'s care.\n\nGroup 3 - Patient History Team (PHT)\nMember 1: Psychiatrist or Psychologist (Lead) - Addresses any psychological impacts of the chronic disease and its treatments, including issues related to voice changes, self-esteem, and coping strategies.\nMember 2: Physical Therapist - Offers exercises and strategies to maintain physical health and potentially support vocal function recovery indirectly through overall well-being.\nMember 3: Vocational Therapist - Assists the patient in adapting to changes in voice, especially if their profession relies heavily on vocal communication, helping them find strategies to maintain their occupational roles.\n\nGroup 4 - Final Review and Decision Team (FRDT)\nMember 1: Senior Consultant from each specialty (Lead) - Provides overarching expertise and guidance in decision\nMember 2: Clinical Decision Specialist - Coordinates the different recommendations from the various teams and formulates a comprehensive treatment plan.\nMember 3: Advanced Diagnostic Support - Utilizes advanced diagnostic tools and techniques to confirm the exact extent and cause of nerve damage, aiding in the final decision.\n"""\nAbove is just an example, thus, you should organize your own unique MDTs but you should include Initial Assessment Team (IAT) and Final Review and Decision Team (FRDT) in your recruitment plan. When you return your answer, please strictly refer to the above format without the triple quotes.'
+    recruited = tmp_agent.chat(recruited_prompt)
+
+    # NOTE(xk) here we remove the "*" in the recruited string
+    # recruited = recruited.replace("*", "")
+    # recruited = recruited.replace("#", "")
+
+    Path("misc").mkdir(parents=True, exist_ok=True)
+    with open("misc/recruited.txt", "w") as f:
+        f.write(recruited)
+    with open("misc/recruited_prompt.txt", "w") as f:
+        f.write(recruited_prompt)
 
     groups = [group.strip() for group in recruited.split("Group") if group.strip()]
     group_strings = ["Group " + group for group in groups]
